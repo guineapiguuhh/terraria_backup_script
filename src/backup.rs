@@ -1,65 +1,73 @@
-#[path = "utils.rs"] mod utils;
+use std::{
+    fs::{create_dir, exists},
+    io,
+};
 
-use utils::copy_folder;
-use std::fs::create_dir;
+use chrono::Local;
 
-use chrono::{Local, NaiveDate};
+use crate::{file_utils::copy_dir, terraria};
 
-const SPLASH_TEXT: &'static str = "Terraria Backup Script";
-
-pub fn start(path: String, my_game_path: String) {
-    let folder: String = create_folders(&path);
-
-    println!("[{}]", SPLASH_TEXT);
-    println!("> [Ctrl + C] = Stop Script\n");
-
-    println!("> 1. Vanilla Players Backup");
-    copy_folder(
-        &format!("{}\\Players", my_game_path), 
-        &format!("{}\\Players", folder), 
-    );
-    
-    println!("> 2. Vanilla Worlds Backup");
-    copy_folder(
-        &format!("{}\\Worlds", my_game_path), 
-        &format!("{}\\Worlds", folder), 
-    );
-
-    println!("> 3. Modded Players Backup");
-    copy_folder(
-        &format!("{}\\tModLoader\\Players", my_game_path), 
-        &format!("{}\\tModLoader\\Players", folder), 
-    );
-    
-    println!("> 4. Modded Worlds Backup");
-    copy_folder(
-        &format!("{}\\tModLoader\\Worlds", my_game_path), 
-        &format!("{}\\tModLoader\\Worlds", folder), 
-    );
+#[derive(Debug)]
+pub enum Step {
+    Players,
+    Worlds,
+    TModLoaderPlayers,
+    TModLoaderWorlds,
 }
 
-#[allow(unused)]
-pub fn create_folders(path: &String) -> String {
-    let now: NaiveDate = Local::now().date_naive();
-    let name: String = format!(
-        "Terraria {}",
-        now.format("%d-%m-%Y")
-    );
+impl Step {
+    pub fn to_dir(&self) -> String {
+        match self {
+            Self::Players => "Players",
+            Self::Worlds => "Worlds",
+            Self::TModLoaderPlayers => "tModLoaderPlayers",
+            Self::TModLoaderWorlds => "tModLoaderWorlds",
+        }
+        .to_owned()
+    }
 
-    let folder_path: &String = &format!(
-        "{}\\{}", 
-        path,
-        name
-    );
+    pub fn all_steps() -> [Step; 4] {
+        [
+            Step::Players,
+            Step::Worlds,
+            Step::TModLoaderPlayers,
+            Step::TModLoaderWorlds,
+        ]
+    }
+}
 
-    create_dir(folder_path);
+pub fn create_backup_folders(path: &str) -> String {
+    let now = Local::now().date_naive();
 
-    create_dir(format!("{}\\Players", folder_path));
-    create_dir(format!("{}\\Worlds", folder_path));
+    let folder_path = format!("{}\\{}", path, now.format("Terraria %d-%m-%Y"));
+    let _ = create_dir(&folder_path);
+    let _ = create_dir(format!("{}\\Players", &folder_path));
+    let _ = create_dir(format!("{}\\Worlds", &folder_path));
 
-    create_dir(format!("{}\\tModLoader", folder_path));
-    create_dir(format!("{}\\tModLoader\\Players", folder_path));
-    create_dir(format!("{}\\tModLoader\\Worlds", folder_path));
+    folder_path
+}
 
-    return folder_path.clone();
+pub fn copy_to_backup_folder(
+    path: &str,
+    available_steps: &[Step],
+    on_step: impl Fn(&Step),
+) -> Result<(), io::Error> {
+    let data_path = terraria::get_data_path()
+        .ok_or(io::Error::from(io::ErrorKind::NotFound))?
+        .to_str()
+        .ok_or(io::Error::from(io::ErrorKind::InvalidData))?
+        .to_string();
+
+    for step in available_steps {
+        let dir = step.to_dir();
+
+        let from = format!("{}\\{}", data_path, dir);
+        if !exists(&from)? {
+            continue;
+        }
+
+        copy_dir(from, format!("{}\\{}", path, dir))?;
+        on_step(step);
+    }
+    Ok(())
 }
